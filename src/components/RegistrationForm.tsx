@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -10,39 +10,64 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Store, User, Building2, CheckCircle2 } from "lucide-react";
+import { BASE_TYPE_OPTIONS } from "@/data/stalls";
+import QRCode from "qrcode";
 
 const registrationSchema = z.object({
   firstName: z.string().trim().min(2, "First name must be at least 2 characters").max(100),
   lastName: z.string().trim().min(2, "Last name must be at least 2 characters").max(100),
-  email: z.string().trim().email("Invalid email address").max(255),
   phone: z.string().trim().min(10, "Phone number must be at least 10 digits").max(20),
   address: z.string().trim().min(10, "Address must be at least 10 characters").max(500),
-  businessName: z.string().trim().min(2, "Business name required").max(200),
-  businessType: z.string().min(1, "Please select a business type"),
-  yearsInBusiness: z.string().min(1, "Required field"),
-  stallSize: z.string().min(1, "Please select a stall size"),
-  locationPreference: z.string().min(1, "Please select a location preference"),
-  additionalInfo: z.string().max(1000).optional(),
+  stallName: z.string().trim().min(2, "Stall name required").max(200),
+  stallType: z.string().min(1, "Please select a stall type"),
+  monthlyRent: z.coerce.number().positive("Rent must be a positive number."),
 });
 
 type RegistrationFormData = z.infer<typeof registrationSchema>;
+type SubmittedData = RegistrationFormData & { registrationId: string };
 
 export const RegistrationForm = () => {
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submittedData, setSubmittedData] = useState<SubmittedData | null>(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
     setValue,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm<RegistrationFormData>({
     resolver: zodResolver(registrationSchema),
   });
 
+  useEffect(() => {
+    if (submittedData) {
+      const generateQrCode = async () => {
+        try {
+          const dataUrl = await QRCode.toDataURL(JSON.stringify(submittedData));
+          setQrCodeDataUrl(dataUrl);
+        } catch (err) {
+          console.error("Failed to generate QR code", err);
+          toast.error("Could not generate QR code.");
+        }
+      };
+      generateQrCode();
+    }
+  }, [submittedData]);
+
   const onSubmit = async (data: RegistrationFormData) => {
     try {
       // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      console.log("Form submitted:", data);
+      
+      const submissionData = {
+        ...data,
+        registrationId: `REG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      };
+
+      console.log("Form submitted:", submissionData);
+      setSubmittedData(submissionData);
       setIsSubmitted(true);
       toast.success("Registration submitted successfully!");
     } catch (error) {
@@ -50,7 +75,14 @@ export const RegistrationForm = () => {
     }
   };
 
-  if (isSubmitted) {
+  const handleAnotherRegistration = () => {
+    setIsSubmitted(false);
+    setSubmittedData(null);
+    setQrCodeDataUrl(null);
+    reset();
+  };
+
+  if (isSubmitted && submittedData) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-[image:var(--gradient-bg)]">
         <Card className="w-full max-w-2xl shadow-2xl border-2">
@@ -62,10 +94,19 @@ export const RegistrationForm = () => {
             </div>
             <h2 className="text-3xl font-bold mb-4 text-foreground">Registration Submitted!</h2>
             <p className="text-muted-foreground text-lg mb-8">
-              Thank you for registering. We'll review your application and contact you within 3-5 business days.
+              Thank you for registering. Please present this QR code for verification.
             </p>
+            <div className="mb-8 flex justify-center">
+              <div className="p-4 bg-white rounded-lg border">
+                {qrCodeDataUrl ? (
+                  <img src={qrCodeDataUrl} alt="QR Code" />
+                ) : (
+                  <p>Generating QR code...</p>
+                )}
+              </div>
+            </div>
             <Button 
-              onClick={() => setIsSubmitted(false)} 
+              onClick={handleAnotherRegistration} 
               className="bg-[image:var(--gradient-primary)] hover:opacity-90 transition-opacity"
             >
               Submit Another Registration
@@ -129,32 +170,17 @@ export const RegistrationForm = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email Address *</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    {...register("email")}
-                    className={errors.email ? "border-destructive" : ""}
-                  />
-                  {errors.email && (
-                    <p className="text-sm text-destructive">{errors.email.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone Number *</Label>
-                  <Input
-                    id="phone"
-                    {...register("phone")}
-                    placeholder="+63 XXX XXX XXXX"
-                    className={errors.phone ? "border-destructive" : ""}
-                  />
-                  {errors.phone && (
-                    <p className="text-sm text-destructive">{errors.phone.message}</p>
-                  )}
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number *</Label>
+                <Input
+                  id="phone"
+                  {...register("phone")}
+                  placeholder="+63 XXX XXX XXXX"
+                  className={errors.phone ? "border-destructive" : ""}
+                />
+                {errors.phone && (
+                  <p className="text-sm text-destructive">{errors.phone.message}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -171,120 +197,55 @@ export const RegistrationForm = () => {
               </div>
             </div>
 
-            {/* Business Information */}
+            {/* Stall Information */}
             <div className="space-y-6">
               <div className="flex items-center gap-2 pb-2 border-b">
                 <Building2 className="h-5 w-5 text-primary" />
-                <h3 className="text-xl font-semibold">Business Information</h3>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="businessName">Business Name *</Label>
-                <Input
-                  id="businessName"
-                  {...register("businessName")}
-                  className={errors.businessName ? "border-destructive" : ""}
-                />
-                {errors.businessName && (
-                  <p className="text-sm text-destructive">{errors.businessName.message}</p>
-                )}
+                <h3 className="text-xl font-semibold">Stall Information</h3>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <Label htmlFor="businessType">Business Type *</Label>
-                  <Select onValueChange={(value) => setValue("businessType", value)}>
-                    <SelectTrigger className={errors.businessType ? "border-destructive" : ""}>
+                  <Label htmlFor="stallName">Stall Name *</Label>
+                  <Input
+                    id="stallName"
+                    {...register("stallName")}
+                    className={errors.stallName ? "border-destructive" : ""}
+                  />
+                  {errors.stallName && (
+                    <p className="text-sm text-destructive">{errors.stallName.message}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="stallType">Stall Type *</Label>
+                  <Select onValueChange={(value) => setValue("stallType", value)}>
+                    <SelectTrigger className={errors.stallType ? "border-destructive" : ""}>
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="food">Food & Beverages</SelectItem>
-                      <SelectItem value="clothing">Clothing & Apparel</SelectItem>
-                      <SelectItem value="produce">Fresh Produce</SelectItem>
-                      <SelectItem value="meat">Meat & Seafood</SelectItem>
-                      <SelectItem value="household">Household Items</SelectItem>
-                      <SelectItem value="handicrafts">Handicrafts & Souvenirs</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      {BASE_TYPE_OPTIONS.map((type) => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  {errors.businessType && (
-                    <p className="text-sm text-destructive">{errors.businessType.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="yearsInBusiness">Years in Business *</Label>
-                  <Select onValueChange={(value) => setValue("yearsInBusiness", value)}>
-                    <SelectTrigger className={errors.yearsInBusiness ? "border-destructive" : ""}>
-                      <SelectValue placeholder="Select range" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="new">New Business</SelectItem>
-                      <SelectItem value="1-2">1-2 years</SelectItem>
-                      <SelectItem value="3-5">3-5 years</SelectItem>
-                      <SelectItem value="5+">5+ years</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.yearsInBusiness && (
-                    <p className="text-sm text-destructive">{errors.yearsInBusiness.message}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Stall Preferences */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-2 pb-2 border-b">
-                <Store className="h-5 w-5 text-primary" />
-                <h3 className="text-xl font-semibold">Stall Preferences</h3>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="stallSize">Preferred Stall Size *</Label>
-                  <Select onValueChange={(value) => setValue("stallSize", value)}>
-                    <SelectTrigger className={errors.stallSize ? "border-destructive" : ""}>
-                      <SelectValue placeholder="Select size" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="small">Small (2m x 2m)</SelectItem>
-                      <SelectItem value="medium">Medium (3m x 3m)</SelectItem>
-                      <SelectItem value="large">Large (4m x 4m)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.stallSize && (
-                    <p className="text-sm text-destructive">{errors.stallSize.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="locationPreference">Location Preference *</Label>
-                  <Select onValueChange={(value) => setValue("locationPreference", value)}>
-                    <SelectTrigger className={errors.locationPreference ? "border-destructive" : ""}>
-                      <SelectValue placeholder="Select location" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="main-entrance">Near Main Entrance</SelectItem>
-                      <SelectItem value="food-court">Food Court Area</SelectItem>
-                      <SelectItem value="produce">Produce Section</SelectItem>
-                      <SelectItem value="general">General Area</SelectItem>
-                      <SelectItem value="no-preference">No Preference</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.locationPreference && (
-                    <p className="text-sm text-destructive">{errors.locationPreference.message}</p>
+                  {errors.stallType && (
+                    <p className="text-sm text-destructive">{errors.stallType.message}</p>
                   )}
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="additionalInfo">Additional Information (Optional)</Label>
-                <Textarea
-                  id="additionalInfo"
-                  {...register("additionalInfo")}
-                  rows={4}
-                  placeholder="Any special requirements or additional details..."
+                <Label htmlFor="monthlyRent">Monthly Rent (PHP) *</Label>
+                <Input
+                  id="monthlyRent"
+                  type="number"
+                  {...register("monthlyRent")}
+                  className={errors.monthlyRent ? "border-destructive" : ""}
                 />
+                {errors.monthlyRent && (
+                  <p className="text-sm text-destructive">{errors.monthlyRent.message}</p>
+                )}
               </div>
             </div>
 
