@@ -1,46 +1,39 @@
 import { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { toast } from "sonner";
-import { Store, User, Building2, CheckCircle2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { BASE_TYPE_OPTIONS } from "@/data/stalls";
 import QRCode from "qrcode";
+import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import jsPDF from "jspdf";
 
-const registrationSchema = z.object({
-  firstName: z.string().trim().min(2, "First name must be at least 2 characters").max(100),
-  lastName: z.string().trim().min(2, "Last name must be at least 2 characters").max(100),
-  phone: z.string().trim().min(10, "Phone number must be at least 10 digits").max(20),
-  address: z.string().trim().min(10, "Address must be at least 10 characters").max(500),
-  stallName: z.string().trim().min(2, "Stall name required").max(200),
-  stallType: z.string().min(1, "Please select a stall type"),
-  monthlyRent: z.coerce.number().positive("Rent must be a positive number."),
-});
+interface FormData {
+  vendor: string;
+  contact: string;
+  type: string;
+  monthlyRent: number;
+}
 
-type RegistrationFormData = z.infer<typeof registrationSchema>;
-type SubmittedData = RegistrationFormData & { registrationId: string };
+interface SubmittedData extends FormData {
+  id?: number;
+  last_payment?: string;
+  next_due?: string;
+}
 
-export const RegistrationForm = () => {
-  const [isSubmitted, setIsSubmitted] = useState(false);
+export default function RegistrationForm() {
+  const [formData, setFormData] = useState<FormData>({
+    vendor: "",
+    contact: "",
+    type: "",
+    monthlyRent: 0,
+  });
   const [submittedData, setSubmittedData] = useState<SubmittedData | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const {
-    register,
-    handleSubmit,
-    setValue,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<RegistrationFormData>({
-    resolver: zodResolver(registrationSchema),
-  });
-
+  // Generate QR after submit
   useEffect(() => {
     if (submittedData) {
       const generateQrCode = async () => {
@@ -56,211 +49,198 @@ export const RegistrationForm = () => {
     }
   }, [submittedData]);
 
-  const onSubmit = async (data: RegistrationFormData) => {
-    try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      
-      const submissionData = {
-        ...data,
-        registrationId: `REG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      };
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: name === "monthlyRent" ? Number(value) : value,
+    }));
+  };
 
-      console.log("Form submitted:", submissionData);
-      setSubmittedData(submissionData);
-      setIsSubmitted(true);
-      toast.success("Registration submitted successfully!");
-    } catch (error) {
-      toast.error("Failed to submit registration. Please try again.");
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+
+    if (!/^09\d{9}$/.test(formData.contact)) {
+      toast.error("Please enter a valid 11-digit contact number starting with 09");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const today = new Date();
+      const nextMonth = new Date(today);
+      nextMonth.setMonth(today.getMonth() + 1);
+
+      const { data, error } = await supabase
+        .from("vendors")
+        .insert([
+          {
+            vendor: formData.vendor,
+            contact: formData.contact,
+            type: formData.type,
+            monthly_rent: formData.monthlyRent,
+            last_payment: today.toISOString().split("T")[0],
+            next_due: nextMonth.toISOString().split("T")[0],
+            status: "current",
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSubmittedData(data);
+      toast.success("Registration successful!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Registration failed: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleAnotherRegistration = () => {
-    setIsSubmitted(false);
+  const handleReset = () => {
     setSubmittedData(null);
     setQrCodeDataUrl(null);
-    reset();
+    setFormData({ vendor: "", contact: "", type: "", monthlyRent: 0 });
   };
 
-  if (isSubmitted && submittedData) {
+  const handleDownloadPDF = async () => {
+    if (!submittedData || !qrCodeDataUrl) return;
+
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("SIBULAN MARKET PAY", 105, 20, { align: "center" });
+    doc.setFontSize(12);
+    doc.text("Stall Registration Receipt", 105, 28, { align: "center" });
+
+    doc.setFontSize(11);
+    doc.text(`Vendor: ${submittedData.vendor}`, 20, 50);
+    doc.text(`Contact: ${submittedData.contact}`, 20, 60);
+    doc.text(`Stall Type: ${submittedData.type}`, 20, 70);
+    doc.text(`Monthly Rent: ₱${submittedData.monthlyRent}`, 20, 80);
+    doc.text(`Date Registered: ${new Date().toLocaleDateString()}`, 20, 90);
+    doc.text(`Next Due: ${submittedData.next_due || "N/A"}`, 20, 100);
+
+    doc.text("QR Code:", 20, 115);
+    doc.addImage(qrCodeDataUrl, "PNG", 20, 120, 50, 50);
+
+    doc.setFontSize(10);
+    doc.text(
+      "Thank you for registering with Sibulan Market Pay!",
+      105,
+      180,
+      { align: "center" }
+    );
+
+    doc.save(`stall-receipt-${submittedData.vendor}.pdf`);
+  };
+
+  // ------------- SUCCESS SCREEN -------------
+  if (submittedData) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-[image:var(--gradient-bg)]">
-        <Card className="w-full max-w-2xl shadow-2xl border-2">
-          <CardContent className="pt-12 pb-12 text-center">
-            <div className="mb-6 flex justify-center">
-              <div className="rounded-full bg-primary/10 p-6">
-                <CheckCircle2 className="h-16 w-16 text-primary" />
-              </div>
-            </div>
-            <h2 className="text-3xl font-bold mb-4 text-foreground">Registration Submitted!</h2>
-            <p className="text-muted-foreground text-lg mb-8">
+      <div className="flex justify-center items-center min-h-screen bg-gradient-to-b from-primary/10 via-secondary/30 to-background p-6">
+        <Card className="max-w-md w-full text-center shadow-lg">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold mb-2 text-green-600">
+              Registration Successful!
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm mb-4">
               Thank you for registering. Please present this QR code for verification.
             </p>
-            <div className="mb-8 flex justify-center">
-              <div className="p-4 bg-white rounded-lg border">
-                {qrCodeDataUrl ? (
-                  <img src={qrCodeDataUrl} alt="QR Code" />
-                ) : (
-                  <p>Generating QR code...</p>
-                )}
-              </div>
+
+            <div className="p-4 bg-white rounded-lg border inline-block mb-4">
+              {qrCodeDataUrl ? (
+                <img src={qrCodeDataUrl} alt="QR Code" className="w-48 h-48 mx-auto" />
+              ) : (
+                <p>Generating QR code...</p>
+              )}
             </div>
-            <Button 
-              onClick={handleAnotherRegistration} 
-              className="bg-[image:var(--gradient-primary)] hover:opacity-90 transition-opacity"
-            >
-              Submit Another Registration
-            </Button>
+
+            <div className="flex flex-col gap-3">
+              <Button onClick={handleDownloadPDF} className="w-full">
+                Download Receipt (PDF)
+              </Button>
+              <Button variant="outline" onClick={handleReset} className="w-full">
+                Register Another Stall
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  // ------------- REGISTRATION FORM -------------
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-[image:var(--gradient-bg)]">
-      <Card className="w-full max-w-4xl shadow-2xl border-2">
-        <CardHeader className="space-y-2 pb-8 border-b bg-gradient-to-br from-primary/5 to-accent/5">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-3 rounded-lg bg-[image:var(--gradient-primary)]">
-              <Store className="h-8 w-8 text-white" />
+    <div className="flex justify-center items-center min-h-screen bg-gradient-to-b from-primary/10 via-secondary/30 to-background p-6">
+      <Card className="max-w-md w-full shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-2xl font-bold text-center">Stall Registration</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="vendor">Vendor Name</Label>
+              <Input
+                id="vendor"
+                name="vendor"
+                value={formData.vendor}
+                onChange={handleChange}
+                required
+              />
             </div>
             <div>
-              <CardTitle className="text-3xl font-bold">Sibulan Market Stall Rental</CardTitle>
-              <CardDescription className="text-base mt-1">Registration Form</CardDescription>
+              <Label htmlFor="contact">Contact Number</Label>
+              <Input
+                id="contact"
+                name="contact"
+                value={formData.contact}
+                onChange={handleChange}
+                placeholder="09xxxxxxxxx"
+                required
+              />
             </div>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Please fill out all required fields to register for a market stall rental.
-          </p>
-        </CardHeader>
-
-        <CardContent className="pt-8">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-            {/* Personal Information */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-2 pb-2 border-b">
-                <User className="h-5 w-5 text-primary" />
-                <h3 className="text-xl font-semibold">Personal Information</h3>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName">First Name *</Label>
-                  <Input
-                    id="firstName"
-                    {...register("firstName")}
-                    className={errors.firstName ? "border-destructive" : ""}
-                  />
-                  {errors.firstName && (
-                    <p className="text-sm text-destructive">{errors.firstName.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Last Name *</Label>
-                  <Input
-                    id="lastName"
-                    {...register("lastName")}
-                    className={errors.lastName ? "border-destructive" : ""}
-                  />
-                  {errors.lastName && (
-                    <p className="text-sm text-destructive">{errors.lastName.message}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number *</Label>
-                <Input
-                  id="phone"
-                  {...register("phone")}
-                  placeholder="+63 XXX XXX XXXX"
-                  className={errors.phone ? "border-destructive" : ""}
-                />
-                {errors.phone && (
-                  <p className="text-sm text-destructive">{errors.phone.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="address">Complete Address *</Label>
-                <Textarea
-                  id="address"
-                  {...register("address")}
-                  rows={3}
-                  className={errors.address ? "border-destructive" : ""}
-                />
-                {errors.address && (
-                  <p className="text-sm text-destructive">{errors.address.message}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Stall Information */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-2 pb-2 border-b">
-                <Building2 className="h-5 w-5 text-primary" />
-                <h3 className="text-xl font-semibold">Stall Information</h3>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="stallName">Stall Name *</Label>
-                  <Input
-                    id="stallName"
-                    {...register("stallName")}
-                    className={errors.stallName ? "border-destructive" : ""}
-                  />
-                  {errors.stallName && (
-                    <p className="text-sm text-destructive">{errors.stallName.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="stallType">Stall Type *</Label>
-                  <Select onValueChange={(value) => setValue("stallType", value)}>
-                    <SelectTrigger className={errors.stallType ? "border-destructive" : ""}>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BASE_TYPE_OPTIONS.map((type) => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {errors.stallType && (
-                    <p className="text-sm text-destructive">{errors.stallType.message}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="monthlyRent">Monthly Rent (PHP) *</Label>
-                <Input
-                  id="monthlyRent"
-                  type="number"
-                  {...register("monthlyRent")}
-                  className={errors.monthlyRent ? "border-destructive" : ""}
-                />
-                {errors.monthlyRent && (
-                  <p className="text-sm text-destructive">{errors.monthlyRent.message}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-4">
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full md:w-auto bg-[image:var(--gradient-primary)] hover:opacity-90 transition-opacity text-lg py-6 px-8"
+            <div>
+              <Label htmlFor="type">Stall Type</Label>
+              <select
+                id="type"
+                name="type"
+                value={formData.type}
+                onChange={handleChange}
+                required
+                className="w-full border border-input rounded-md p-2 text-sm bg-background"
               >
-                {isSubmitting ? "Submitting..." : "Submit Registration"}
-              </Button>
+                <option value="">Select type</option>
+                {BASE_TYPE_OPTIONS.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
             </div>
+            <div>
+              <Label htmlFor="monthlyRent">Monthly Rent (PHP)</Label>
+              <Input
+                id="monthlyRent"
+                name="monthlyRent"
+                type="number"
+                min={0}
+                value={formData.monthlyRent}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? "Submitting..." : "Submit Registration"}
+            </Button>
           </form>
         </CardContent>
       </Card>
     </div>
   );
-};
+}
