@@ -13,11 +13,15 @@ interface FormData {
   vendor: string;
   contact: string;
   type: string;
-  monthlyRent: number;
+  monthlyRent: string;
 }
 
-interface SubmittedData extends FormData {
+interface SubmittedData {
   id?: number;
+  vendor: string;
+  contact: string;
+  type: string;
+  monthlyRent: number;
   last_payment?: string;
   next_due?: string;
 }
@@ -27,7 +31,7 @@ export default function RegistrationForm() {
     vendor: "",
     contact: "",
     type: "",
-    monthlyRent: 0,
+    monthlyRent: "",
   });
   const [submittedData, setSubmittedData] = useState<SubmittedData | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
@@ -51,9 +55,19 @@ export default function RegistrationForm() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+
+    if (name === "contact") {
+      const digitsOnly = value.replace(/\D/g, "").slice(0, 11);
+      setFormData((prev) => ({
+        ...prev,
+        contact: digitsOnly,
+      }));
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
-      [name]: name === "monthlyRent" ? Number(value) : value,
+      [name]: value,
     }));
   };
 
@@ -79,7 +93,7 @@ export default function RegistrationForm() {
             vendor: formData.vendor,
             contact: formData.contact,
             type: formData.type,
-            monthly_rent: formData.monthlyRent,
+            monthly_rent: Number(formData.monthlyRent || 0),
             last_payment: today.toISOString().split("T")[0],
             next_due: nextMonth.toISOString().split("T")[0],
             status: "current",
@@ -90,7 +104,15 @@ export default function RegistrationForm() {
 
       if (error) throw error;
 
-      setSubmittedData(data);
+      setSubmittedData({
+        id: data.id,
+        vendor: data.vendor,
+        contact: data.contact,
+        type: data.type,
+        monthlyRent: Number((data.monthly_rent ?? formData.monthlyRent) || 0),
+        last_payment: data.last_payment,
+        next_due: data.next_due,
+      });
       toast.success("Registration successful!");
     } catch (err: any) {
       console.error(err);
@@ -103,7 +125,7 @@ export default function RegistrationForm() {
   const handleReset = () => {
     setSubmittedData(null);
     setQrCodeDataUrl(null);
-    setFormData({ vendor: "", contact: "", type: "", monthlyRent: 0 });
+    setFormData({ vendor: "", contact: "", type: "", monthlyRent: "" });
   };
 
   const handleDownloadPDF = async () => {
@@ -178,12 +200,18 @@ export default function RegistrationForm() {
   // ------------- REGISTRATION FORM -------------
   return (
     <div className="flex justify-center items-center min-h-screen bg-gradient-to-b from-primary/10 via-secondary/30 to-background p-6">
-      <Card className="max-w-md w-full shadow-lg">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">Stall Registration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex flex-col items-center gap-6">
+        <img
+          src="https://cdn.builder.io/api/v1/image/assets%2F91a6ef17b9d24a3a990b22eddcf74bd4%2Fdfdf48c4de854c4daf984ec5ed9b2757?format=webp&width=800"
+          alt="Municipality of Sibulan seal"
+          className="w-28 sm:w-32 md:w-36"
+        />
+        <Card className="max-w-md w-full shadow-lg">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold text-center">Stall Registration</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <Label htmlFor="vendor">Vendor Name</Label>
               <Input
@@ -199,6 +227,10 @@ export default function RegistrationForm() {
               <Input
                 id="contact"
                 name="contact"
+                type="tel"
+                inputMode="numeric"
+                maxLength={11}
+                pattern="\d{11}"
                 value={formData.contact}
                 onChange={handleChange}
                 placeholder="09xxxxxxxxx"
@@ -239,8 +271,9 @@ export default function RegistrationForm() {
               {loading ? "Submitting..." : "Submit Registration"}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
