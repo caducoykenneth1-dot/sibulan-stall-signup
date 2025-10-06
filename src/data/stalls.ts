@@ -16,15 +16,13 @@ export type StallRecord = {
 
 
 export const BASE_TYPE_OPTIONS: string[] = [
+"Vegetables",
   "Fish",
   "Meat",
-  "Vegetables",
-  "Fruits",
-  "Dry Goods",
-  "General",
-  "Frozen Goods",
-  "Poultry",
-  "Spices"
+  "Rice",
+  "Grocery",
+  "Clothing",
+  "Others",
 ];
 
 export const createInitialStalls = (): StallRecord[] => [];
